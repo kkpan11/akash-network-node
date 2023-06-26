@@ -34,28 +34,28 @@ endif
 
 # if go.mod contains replace for any modules on local filesystem
 # mount them into docker during goreleaser build to exactly same path
-REPLACED_MODULES              := $(shell go list -mod=readonly -m -f '{{ .Replace }}' all 2>/dev/null | grep -v -x -F "<nil>" | grep "^/")
-ifneq ($(REPLACED_MODULES), )
-	GORELEASER_MOUNT_REPLACED := $(foreach mod, $(REPLACED_MODULES), -v $(mod):$(mod)\\)
-endif
-GORELEASER_MOUNT_REPLACED     := $(GORELEASER_MOUNT_REPLACED:\\=)
+#REPLACED_MODULES              := $(shell go list -mod=readonly -m -f '{{ .Replace }}' all 2>/dev/null | grep -v -x -F "<nil>" | grep "^/")
+#ifneq ($(REPLACED_MODULES), )
+#	GORELEASER_MOUNT_REPLACED := $(foreach mod, $(REPLACED_MODULES), -v $(mod):$(mod)\\)
+#endif
+#GORELEASER_MOUNT_REPLACED     := $(GORELEASER_MOUNT_REPLACED:\\=)
 
 .PHONY: bins
 bins: $(BINS)
 
 .PHONY: build
 build:
-	$(GO) build -a  ./...
+	$(GO_BUILD) -a  ./...
 
-$(AKASH): modvendor
-	$(GO) build -o $@ $(BUILD_FLAGS) ./cmd/akash
+$(AKASH):
+	$(GO_BUILD) -o $@ $(BUILD_FLAGS) ./cmd/akash
 
 .PHONY: akash
 akash: $(AKASH)
 
 .PHONY: akash_docgen
 akash_docgen: $(AKASH_DEVCACHE)
-	$(GO) build -o $(AKASH_DEVCACHE_BIN)/akash_docgen $(BUILD_FLAGS) ./docgen
+	$(GO_BUILD) -o $(AKASH_DEVCACHE_BIN)/akash_docgen $(BUILD_FLAGS) ./docgen
 
 .PHONY: install
 install:
@@ -77,10 +77,11 @@ docker-image:
 		-e STRIP_FLAGS="$(GORELEASER_STRIP_FLAGS)" \
 		-e LINKMODE="$(GO_LINKMODE)" \
 		-e DOCKER_IMAGE=$(RELEASE_DOCKER_IMAGE) \
+		-e GOPATH=/go \
+		-v $(GOPATH):/go:ro \
 		-v /var/run/docker.sock:/var/run/docker.sock \
-		$(GORELEASER_MOUNT_REPLACED) \
-		-v `pwd`:/go/src/github.com/akash-network/node \
-		-w /go/src/github.com/akash-network/node \
+		-v `pwd`:/go/src/$(GO_MOD_NAME) \
+		-w /go/src/$(GO_MOD_NAME) \
 		$(GORELEASER_IMAGE) \
 		-f .goreleaser-docker.yaml \
 		--debug=$(GORELEASER_DEBUG) \
@@ -94,7 +95,7 @@ gen-changelog: $(GIT_CHGLOG)
 	@echo "generating changelog to .cache/changelog"
 	./script/genchangelog.sh "$(RELEASE_TAG)" .cache/changelog.md
 .PHONY: release
-release: modvendor gen-changelog
+release: gen-changelog
 	docker run \
 		--rm \
 		-e STABLE=$(IS_STABLE) \
@@ -106,8 +107,9 @@ release: modvendor gen-changelog
 		-e GITHUB_TOKEN="$(GITHUB_TOKEN)" \
 		-e GORELEASER_CURRENT_TAG="$(RELEASE_TAG)" \
 		-e DOCKER_IMAGE=$(RELEASE_DOCKER_IMAGE) \
+		-e GOPATH=/go \
+		-v $(GOPATH):/go:ro \
 		-v /var/run/docker.sock:/var/run/docker.sock \
-		$(GORELEASER_MOUNT_REPLACED) \
 		-v `pwd`:/go/src/$(GO_MOD_NAME) \
 		-w /go/src/$(GO_MOD_NAME) \
 		$(GORELEASER_IMAGE) \

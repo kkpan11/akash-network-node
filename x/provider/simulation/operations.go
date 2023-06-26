@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"fmt"
 	"math/rand"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
@@ -12,11 +13,11 @@ import (
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	"github.com/cosmos/cosmos-sdk/x/simulation"
-	"github.com/pkg/errors"
 
 	types "github.com/akash-network/akash-api/go/node/provider/v1beta3"
 
 	appparams "github.com/akash-network/node/app/params"
+	testsim "github.com/akash-network/node/testutil/sim"
 	"github.com/akash-network/node/x/provider/config"
 	"github.com/akash-network/node/x/provider/keeper"
 )
@@ -131,8 +132,7 @@ func SimulateMsgUpdate(ak govtypes.AccountKeeper, bk bankkeeper.Keeper, k keeper
 		}
 
 		// Get random deployment
-		i := r.Intn(len(providers))
-		provider := providers[i]
+		provider := providers[testsim.RandIdx(r, len(providers)-1)]
 
 		owner, convertErr := sdk.AccAddressFromBech32(provider.Owner)
 		if convertErr != nil {
@@ -143,7 +143,7 @@ func SimulateMsgUpdate(ak govtypes.AccountKeeper, bk bankkeeper.Keeper, k keeper
 		simAccount, found := simtypes.FindAccount(accounts, owner)
 		if !found {
 			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeUpdateProvider, "provider not found"),
-				nil, errors.Errorf("provider with %s not found", provider.Owner)
+				nil, fmt.Errorf("provider with %s not found", provider.Owner)
 		}
 
 		account := ak.GetAccount(ctx, simAccount.Address)

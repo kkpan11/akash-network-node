@@ -1,10 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"strings"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
@@ -17,8 +17,8 @@ const (
 )
 
 var (
-	ErrStateValue  = errors.New("query: invalid state value")
-	DefaultDeposit = types.DefaultDeploymentMinDeposit
+	ErrStateValue     = errors.New("query: invalid state value")
+	DefaultDeposit, _ = types.DefaultParams().MinDepositFor("uakt")
 )
 
 type DeploymentIDOptions struct {

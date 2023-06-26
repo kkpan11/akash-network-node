@@ -3,12 +3,13 @@ package handler
 import (
 	"bytes"
 	"context"
+	"fmt"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
-	"github.com/pkg/errors"
 
 	types "github.com/akash-network/akash-api/go/node/deployment/v1beta3"
+
 	"github.com/akash-network/node/x/deployment/keeper"
 )
 
@@ -34,13 +35,9 @@ func (ms msgServer) CreateDeployment(goCtx context.Context, msg *types.MsgCreate
 		return nil, types.ErrDeploymentExists
 	}
 
-	minDeposit := ms.deployment.GetParams(ctx).DeploymentMinDeposit
-
-	if minDeposit.Denom != msg.Deposit.Denom {
-		return nil, errors.Wrapf(types.ErrInvalidDeposit, "mininum:%v received:%v", minDeposit, msg.Deposit)
-	}
-	if minDeposit.Amount.GT(msg.Deposit.Amount) {
-		return nil, errors.Wrapf(types.ErrInvalidDeposit, "mininum:%v received:%v", minDeposit, msg.Deposit)
+	params := ms.deployment.GetParams(ctx)
+	if err := params.ValidateDeposit(msg.Deposit); err != nil {
+		return nil, err
 	}
 
 	deployment := types.Deployment{
@@ -51,7 +48,7 @@ func (ms msgServer) CreateDeployment(goCtx context.Context, msg *types.MsgCreate
 	}
 
 	if err := types.ValidateDeploymentGroups(msg.Groups); err != nil {
-		return nil, errors.Wrap(types.ErrInvalidGroups, err.Error())
+		return nil, fmt.Errorf("%w: %s", types.ErrInvalidGroups, err.Error())
 	}
 
 	owner, err := sdk.AccAddressFromBech32(msg.ID.Owner)
@@ -80,7 +77,7 @@ func (ms msgServer) CreateDeployment(goCtx context.Context, msg *types.MsgCreate
 	}
 
 	if err := ms.deployment.Create(ctx, deployment, groups); err != nil {
-		return nil, errors.Wrap(types.ErrInternal, err.Error())
+		return nil, fmt.Errorf("%w: %s", types.ErrInternal, err.Error())
 	}
 
 	// create orders
@@ -191,7 +188,7 @@ func (ms msgServer) UpdateDeployment(goCtx context.Context, msg *types.MsgUpdate
 	deployment.Version = msg.Version
 
 	if err := ms.deployment.UpdateDeployment(ctx, deployment); err != nil {
-		return &types.MsgUpdateDeploymentResponse{}, errors.Wrap(types.ErrInternal, err.Error())
+		return &types.MsgUpdateDeploymentResponse{}, fmt.Errorf("%w: %s", types.ErrInternal, err.Error())
 	}
 
 	return &types.MsgUpdateDeploymentResponse{}, nil

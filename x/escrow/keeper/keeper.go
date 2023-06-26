@@ -1,11 +1,13 @@
 package keeper
 
 import (
+	"fmt"
+
 	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/pkg/errors"
 
 	types "github.com/akash-network/akash-api/go/node/escrow/v1beta3"
+	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 )
 
 type AccountHook func(sdk.Context, types.Account)
@@ -33,11 +35,13 @@ type Keeper interface {
 	SavePayment(sdk.Context, types.FractionalPayment)
 }
 
-func NewKeeper(cdc codec.BinaryCodec, skey sdk.StoreKey, bkeeper BankKeeper) Keeper {
+func NewKeeper(cdc codec.BinaryCodec, skey sdk.StoreKey, bkeeper BankKeeper, tkeeper TakeKeeper, dkeeper DistrKeeper) Keeper {
 	return &keeper{
 		cdc:     cdc,
 		skey:    skey,
 		bkeeper: bkeeper,
+		tkeeper: tkeeper,
+		dkeeper: dkeeper,
 	}
 }
 
@@ -45,6 +49,8 @@ type keeper struct {
 	cdc     codec.BinaryCodec
 	skey    sdk.StoreKey
 	bkeeper BankKeeper
+	tkeeper TakeKeeper
+	dkeeper DistrKeeper
 
 	hooks struct {
 		onAccountClosed []AccountHook
@@ -419,7 +425,7 @@ func (k *keeper) doAccountSettle(ctx sdk.Context, id types.AccountID) (types.Acc
 		account, payments, blockRate, amountRemaining)
 
 	if amountRemaining.Amount.GT(sdk.NewDec(1)) {
-		return account, payments, false, errors.Wrapf(types.ErrInvalidSettlement, "Invalid settlement: %v remains", amountRemaining)
+		return account, payments, false, fmt.Errorf("%w: Invalid settlement: %v remains", types.ErrInvalidSettlement, amountRemaining)
 	}
 
 	// save objects
@@ -531,24 +537,55 @@ func (k *keeper) paymentWithdraw(ctx sdk.Context, obj *types.FractionalPayment) 
 		return err
 	}
 
-	// Only run a withdrawal if there is at least 1 uakt to withdraw
-	if obj.Balance.Amount.LT(sdk.NewDec(1)) {
+	rawEarnings := sdk.NewCoin(obj.Balance.Denom, obj.Balance.Amount.TruncateInt())
+
+	if rawEarnings.Amount.IsZero() {
 		return nil
 	}
 
-	// Get the integer part that can actually be withdrawn
-	withdrawalAmount := obj.Balance.Amount.TruncateInt()
-	withdrawal := sdk.NewCoin(obj.Balance.Denom, withdrawalAmount)
-
-	if err := k.bkeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, owner, sdk.NewCoins(withdrawal)); err != nil {
-		ctx.Logger().Error("payment withdraw", "err", err, "account", obj.AccountID, "payment", obj.PaymentID)
+	earnings, fee, err := k.tkeeper.SubtractFees(ctx, rawEarnings)
+	if err != nil {
 		return err
 	}
 
-	obj.Withdrawn = obj.Withdrawn.Add(withdrawal)
-	obj.Balance = obj.Balance.Sub(sdk.NewDecCoinFromCoin(withdrawal))
+	if err := k.sendFeeToCommunityPool(ctx, fee); err != nil {
+		ctx.Logger().Error("payment withdraw - fees", "err", err, "account", obj.AccountID, "payment", obj.PaymentID)
+		return err
+	}
+
+	if !earnings.IsZero() {
+		if err := k.bkeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, owner, sdk.NewCoins(earnings)); err != nil {
+			ctx.Logger().Error("payment withdraw - earnings", "err", err, "account", obj.AccountID, "payment", obj.PaymentID)
+			return err
+		}
+	}
+
+	total := earnings.Add(fee)
+
+	obj.Withdrawn = obj.Withdrawn.Add(total)
+	obj.Balance = obj.Balance.Sub(sdk.NewDecCoinFromCoin(total))
 
 	k.savePayment(ctx, obj)
+	return nil
+}
+
+func (k keeper) sendFeeToCommunityPool(ctx sdk.Context, fee sdk.Coin) error {
+
+	if fee.IsZero() {
+		return nil
+	}
+
+	// see https://github.com/cosmos/cosmos-sdk/blob/c2a07cea272a7878b5bc2ec160eb58ca83794214/x/distribution/keeper/keeper.go#L251-L263
+
+	if err := k.bkeeper.SendCoinsFromModuleToModule(ctx, types.ModuleName, distrtypes.ModuleName, sdk.NewCoins(fee)); err != nil {
+		return err
+	}
+
+	pool := k.dkeeper.GetFeePool(ctx)
+
+	pool.CommunityPool = pool.CommunityPool.Add(sdk.NewDecCoinFromCoin(fee))
+	k.dkeeper.SetFeePool(ctx, pool)
+
 	return nil
 }
 

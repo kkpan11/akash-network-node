@@ -1,9 +1,9 @@
 package simulation
 
 import (
+	"bytes"
+	"fmt"
 	"math/rand"
-
-	"github.com/pkg/errors"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -16,8 +16,10 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/simulation"
 
 	types "github.com/akash-network/akash-api/go/node/deployment/v1beta3"
+
 	appparams "github.com/akash-network/node/app/params"
 	sdlv1 "github.com/akash-network/node/sdl"
+	testsim "github.com/akash-network/node/testutil/sim"
 	"github.com/akash-network/node/x/deployment/keeper"
 )
 
@@ -166,8 +168,22 @@ func SimulateMsgUpdateDeployment(ak govtypes.AccountKeeper, bk bankkeeper.Keeper
 		chainID string) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		var deployments []types.Deployment
 
+		sdl, readError := sdlv1.ReadFile("../x/deployment/testdata/deployment-v2.yaml")
+		if readError != nil {
+			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeUpdateDeployment, "unable to read config file"), nil, readError
+		}
+
+		sdlSum, err := sdlv1.Version(sdl)
+		if err != nil {
+			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeUpdateDeployment, "error parsing deployment version sum"),
+				nil, err
+		}
+
 		k.WithDeployments(ctx, func(deployment types.Deployment) bool {
-			deployments = append(deployments, deployment)
+			// skip deployments that already have been updated
+			if !bytes.Equal(deployment.Version, sdlSum) {
+				deployments = append(deployments, deployment)
+			}
 
 			return false
 		})
@@ -177,8 +193,7 @@ func SimulateMsgUpdateDeployment(ak govtypes.AccountKeeper, bk bankkeeper.Keeper
 		}
 
 		// Get random deployment
-		i := r.Intn(len(deployments))
-		deployment := deployments[i]
+		deployment := deployments[testsim.RandIdx(r, len(deployments)-1)]
 
 		if deployment.State != types.DeploymentActive {
 			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeUpdateDeployment, "deployment closed"), nil, nil
@@ -192,18 +207,7 @@ func SimulateMsgUpdateDeployment(ak govtypes.AccountKeeper, bk bankkeeper.Keeper
 		simAccount, found := simtypes.FindAccount(accounts, owner)
 		if !found {
 			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeUpdateDeployment, "unable to find deployment with given id"),
-				nil, errors.Errorf("deployment with %s not found", deployment.ID().Owner)
-		}
-
-		sdl, readError := sdlv1.ReadFile("../x/deployment/testdata/deployment-v2.yaml")
-		if readError != nil {
-			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeUpdateDeployment, "unable to read config file"), nil, readError
-		}
-
-		sdlSum, err := sdlv1.Version(sdl)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeUpdateDeployment, "error parsing deployment version sum"),
-				nil, err
+				nil, fmt.Errorf("deployment with %s not found", deployment.ID().Owner)
 		}
 
 		account := ak.GetAccount(ctx, simAccount.Address)
@@ -259,8 +263,7 @@ func SimulateMsgCloseDeployment(ak govtypes.AccountKeeper, bk bankkeeper.Keeper,
 		}
 
 		// Get random deployment
-		i := r.Intn(len(deployments))
-		deployment := deployments[i]
+		deployment := deployments[testsim.RandIdx(r, len(deployments)-1)]
 
 		owner, convertErr := sdk.AccAddressFromBech32(deployment.ID().Owner)
 		if convertErr != nil {
@@ -270,7 +273,7 @@ func SimulateMsgCloseDeployment(ak govtypes.AccountKeeper, bk bankkeeper.Keeper,
 		simAccount, found := simtypes.FindAccount(accounts, owner)
 		if !found {
 			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeCloseDeployment, "unable to find deployment"), nil,
-				errors.Errorf("deployment with %s not found", deployment.ID().Owner)
+				fmt.Errorf("deployment with %s not found", deployment.ID().Owner)
 		}
 
 		account := ak.GetAccount(ctx, simAccount.Address)
@@ -322,12 +325,11 @@ func SimulateMsgCloseGroup(ak govtypes.AccountKeeper, bk bankkeeper.Keeper, k ke
 		})
 
 		if len(deployments) == 0 {
-			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeCloseGroup, "no deplyments found"), nil, nil
+			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeCloseGroup, "no deployments found"), nil, nil
 		}
 
 		// Get random deployment
-		i := r.Intn(len(deployments))
-		deployment := deployments[i]
+		deployment := deployments[testsim.RandIdx(r, len(deployments)-1)]
 
 		owner, convertErr := sdk.AccAddressFromBech32(deployment.ID().Owner)
 		if convertErr != nil {
@@ -336,7 +338,7 @@ func SimulateMsgCloseGroup(ak govtypes.AccountKeeper, bk bankkeeper.Keeper, k ke
 
 		simAccount, found := simtypes.FindAccount(accounts, owner)
 		if !found {
-			err := errors.Errorf("deployment with %s not found", deployment.ID().Owner)
+			err := fmt.Errorf("deployment with %s not found", deployment.ID().Owner)
 			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeCloseGroup, err.Error()), nil, err
 		}
 
@@ -352,11 +354,10 @@ func SimulateMsgCloseGroup(ak govtypes.AccountKeeper, bk bankkeeper.Keeper, k ke
 		groups := k.GetGroups(ctx, deployment.ID())
 		if len(groups) < 1 {
 			// No groups to close
-			err := errors.Errorf("no groups for deployment ID: %v", deployment.ID())
+			err := fmt.Errorf("no groups for deployment ID: %v", deployment.ID())
 			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeCloseGroup, err.Error()), nil, err
 		}
-		i = r.Intn(len(groups))
-		group := groups[i]
+		group := groups[testsim.RandIdx(r, len(groups)-1)]
 		if group.State == types.GroupClosed {
 			return simtypes.NoOpMsg(types.ModuleName, types.MsgTypeCloseGroup, "group already closed"), nil, nil
 		}
@@ -385,7 +386,7 @@ func SimulateMsgCloseGroup(ak govtypes.AccountKeeper, bk bankkeeper.Keeper, k ke
 
 		_, _, err = app.Deliver(txGen.TxEncoder(), tx)
 		if err != nil {
-			err = errors.Wrapf(err, "%s: msg delivery error closing group: %v", types.ModuleName, group.ID())
+			err = fmt.Errorf("%w: %s: msg delivery error closing group: %v", err, types.ModuleName, group.ID())
 			return simtypes.NoOpMsg(types.ModuleName, msg.Type(), err.Error()), nil, err
 		}
 		return simtypes.NewOperationMsg(msg, true, "submitting MsgCloseGroup", nil), nil, nil

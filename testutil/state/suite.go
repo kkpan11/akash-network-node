@@ -4,10 +4,12 @@ import (
 	"testing"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	"github.com/stretchr/testify/mock"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 
 	atypes "github.com/akash-network/akash-api/go/node/audit/v1beta3"
+	ttypes "github.com/akash-network/akash-api/go/node/take/v1beta3"
 
 	dtypes "github.com/akash-network/akash-api/go/node/deployment/v1beta3"
 	etypes "github.com/akash-network/akash-api/go/node/escrow/v1beta3"
@@ -24,6 +26,7 @@ import (
 	mhooks "github.com/akash-network/node/x/market/hooks"
 	mkeeper "github.com/akash-network/node/x/market/keeper"
 	pkeeper "github.com/akash-network/node/x/provider/keeper"
+	tkeeper "github.com/akash-network/node/x/take/keeper"
 )
 
 // TestSuite encapsulates a functional Akash nodes data stores for
@@ -37,12 +40,14 @@ type TestSuite struct {
 }
 
 type Keepers struct {
+	Take       tkeeper.IKeeper
 	Escrow     ekeeper.Keeper
 	Audit      akeeper.IKeeper
 	Market     mkeeper.IKeeper
 	Deployment dkeeper.IKeeper
 	Provider   pkeeper.IKeeper
 	Bank       *emocks.BankKeeper
+	Distr      *emocks.DistrKeeper
 }
 
 // SetupTestSuite provides toolkit for accessing stores and keepers
@@ -63,13 +68,27 @@ func SetupTestSuiteWithKeepers(t testing.TB, keepers Keepers) *TestSuite {
 		keepers.Bank = bkeeper
 	}
 
+	if keepers.Distr == nil {
+		dkeeper := &emocks.DistrKeeper{}
+		dkeeper.
+			On("GetFeePool", mock.Anything).
+			Return(distrtypes.FeePool{})
+		dkeeper.On("SetFeePool", mock.Anything, mock.Anything).
+			Return()
+	}
+
 	app := app.Setup(false)
 
 	if keepers.Audit == nil {
 		keepers.Audit = akeeper.NewKeeper(atypes.ModuleCdc, app.GetKey(atypes.StoreKey))
 	}
+
+	if keepers.Take == nil {
+		keepers.Take = tkeeper.NewKeeper(ttypes.ModuleCdc, app.GetKey(ttypes.StoreKey), app.GetSubspace(ttypes.ModuleName))
+	}
+
 	if keepers.Escrow == nil {
-		keepers.Escrow = ekeeper.NewKeeper(etypes.ModuleCdc, app.GetKey(etypes.StoreKey), keepers.Bank)
+		keepers.Escrow = ekeeper.NewKeeper(etypes.ModuleCdc, app.GetKey(etypes.StoreKey), keepers.Bank, keepers.Take, keepers.Distr)
 	}
 	if keepers.Market == nil {
 		keepers.Market = mkeeper.NewKeeper(mtypes.ModuleCdc, app.GetKey(mtypes.StoreKey), app.GetSubspace(mtypes.ModuleName), keepers.Escrow)

@@ -16,8 +16,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
-	ibccltypes "github.com/cosmos/ibc-go/v3/modules/core/02-client/types"
-	ibcchtypes "github.com/cosmos/ibc-go/v3/modules/core/04-channel/types"
+	ibccltypes "github.com/cosmos/ibc-go/v4/modules/core/02-client/types"
+	ibcchtypes "github.com/cosmos/ibc-go/v4/modules/core/04-channel/types"
 )
 
 const (
@@ -26,10 +26,8 @@ const (
 	denomDecimalPlaces = 1e6
 )
 
-var (
-	// yeah, I know
-	cdc codec.Codec
-)
+// yeah, I know
+var cdc codec.Codec
 
 func Cmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -142,8 +140,12 @@ func Cmd() *cobra.Command {
 				}
 				_ = spinner.Stop()
 
+				spinner.Message("preparing genesis state")
+				spinner.StopMessage("prepared genesis state")
+				_ = spinner.Start()
 				gState, err = NewGenesisState(spinner, appState, genDoc)
 				if err != nil {
+					spinner.StopFailMessage(fmt.Sprintf("failed to prepare genesis state: %s", err.Error()))
 					return err
 				}
 			}
